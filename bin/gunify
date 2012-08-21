@@ -48,6 +48,7 @@ class GunTrigger
     :location => 'testthedepot.com',
     :ssh_port => '2203',
     :ssh_user => 'root',
+    :ssh_key => 'localpath/to/ssh_key.pem',
     :repository => "httpdocs/thedepot",
     :local_checkout_directory => '/tmp',
     :remote_release_directory => '/http/thedepot',
@@ -69,7 +70,7 @@ class GunTrigger
 
   def uname
     puts '+++Running uname'
-    lbox = Rye::Box.new( @machine[:location], { :port => @machine[:ssh_port], :user => @machine[:ssh_user]} )
+    lbox = Rye::Box.new( @machine[:location], { :port => @machine[:ssh_port], :user => @machine[:ssh_user], :keys => @machine[:ssh_key]} )
     puts lbox.uname(:a)
   end
 
