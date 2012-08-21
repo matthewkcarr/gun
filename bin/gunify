@@ -1,0 +1,179 @@
+#!/usr/bin/env ruby
+
+require 'optparse'
+require 'fileutils'
+
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{File.basename($0)} [path]"
+
+  opts.on("-h", "--help", "Displays this help info") do
+    puts opts
+    exit 0
+  end
+
+  begin
+    opts.parse!(ARGV)
+  rescue OptionParser::ParseError => e
+    warn e.message
+    puts opts
+    exit 1
+  end
+end
+
+if ARGV.empty?
+  abort "Please specify the directory to gunify, e.g. `#{File.basename($0)} .'"
+elsif !File.exists?(ARGV.first)
+  abort "`#{ARGV.first}' does not exist."
+elsif !File.directory?(ARGV.first)
+  abort "`#{ARGV.first}' is not a directory."
+elsif ARGV.length > 1
+  abort "Too many arguments; please specify only the directory to capify."
+end
+
+def unindent(string)
+  indentation = string[/\A\s*/]
+  string.strip.gsub(/^#{indentation}/, "")
+end
+
+files = {
+  "lib/gun_trigger.rb" => <<-FILE
+require 'rye'                                                                                                                                             
+require 'fileutils'
+
+
+class GunTrigger
+
+  STAGING = {
+    :project_name => 'thedepot',
+    :location => 'testthedepot.com',
+    :ssh_port => '2203',
+    :ssh_user => 'root',
+    :repository => "httpdocs/thedepot",
+    :local_checkout_directory => '/tmp',
+    :remote_release_directory => '/http/thedepot',
+    :remote_codebase_directory => '/usr/local/src/thedepot',
+    :public_folder_owner => 'dude:whiterussia',
+    :rails_root_owner => 'dude:whiterussia',
+    :product_images_folder => "public/images/products",
+    :remote_product_image_folder => "/var/www/vhosts/thedepto/public/images",
+    :db_file => "database.staging.yml"
+  }
+
+  PRODUCTION = {
+    :location => 'thedpot.com'
+  }
+
+  def initialize(machine)
+    @machine = machine
+  end
+
+  def uname
+    puts '+++Running uname'
+    lbox = Rye::Box.new( @machine[:location], { :port => @machine[:ssh_port], :user => @machine[:ssh_user]} )
+    puts lbox.uname(:a)
+  end
+
+  def deploy
+    puts '+++ Deploying to ' + @machine[:location]
+    #Rye::Cmd.add_command :
+    lbox = Rye::Box.new( @machine[:location], { :port => @machine[:ssh_port], :user => @machine[:ssh_user]} )
+    release_date = Time.now.strftime("%Y%m%d%H%M%S")
+    puts '+++ Creating folder ' + release_date
+    checkout_code( @machine[:local_checkout_directory], release_date )  
+    puts "+++ Running copy"
+    copy_code( lbox, release_date )
+    #do mysql related stuff here
+    run_bundler(lbox, release_date)
+    run_migrations(lbox, release_date)
+    link_to_current_codebase(lbox, release_date)
+    set_permissions(lbox, release_date)
+    restart_webserver(lbox)
+  end
+
+  def set_permissions(box, release_date)
+    box.chown "-R", @machine[:rails_root_owner], File.join(@machine[:remote_codebase_directory], release_date )
+    box.chown "-R", @machine[:public_folder_owner], File.join(@machine[:remote_codebase_directory], release_date, "public" )
+    box.chown "-R", @machine[:rails_root_owner], File.join(@machine[:remote_codebase_directory], "current")
+    box.chown "-R", @machine[:public_folder_owner], File.join(@machine[:remote_codebase_directory], "current", "public" )
+  end
+
+  def run_migrations(box, release_date)
+    puts box.mv File.join(@machine[:remote_codebase_directory], release_date, "config", @machine[:db_file]), File.join(@machine[:remote_codebase_directory], release_date, "config", 'database.yml')
+    puts box.rake "-f", File.join(@machine[:remote_codebase_directory], release_date, "Rakefile"),  "db:migrate", "RAILS_ENV=production"
+  end
+
+  def run_bundler(box, release_date)
+    box.disable_safe_mode
+    cmd = "cd " + File.join(@machine[:remote_codebase_directory], release_date) + "; " + 'bundle install'
+    puts "+++ Running " + cmd
+    puts box.execute cmd
+    box.enable_safe_mode
+  end
+
+  def link_to_current_codebase(box, release_date)
+    box.disable_safe_mode
+    puts "+++ Running rm -f " + File.join(@machine[:remote_codebase_directory], "current")
+    puts box.rm '-f', File.join(@machine[:remote_codebase_directory], "current")
+    puts "+++ Running ln -s " + File.join(@machine[:remote_codebase_directory], release_date) + " " +  File.join(@machine[:remote_codebase_directory], "current")
+    puts box.ln "-s", File.join(@machine[:remote_codebase_directory], release_date), File.join(@machine[:remote_codebase_directory], "current")
+    remote_images_dest_folder = File.join(@machine[:remote_codebase_directory], "current", @machine[:product_images_folder]) 
+    puts "+++ Running rm -fr " + remote_images_dest_folder
+    puts box.rm '-fr', remote_images_dest_folder
+    box.enable_safe_mode
+    puts "+++ Running ln -s " + @machine[:remote_product_image_folder] + " " + remote_images_dest_folder
+    puts box.ln "-s", @machine[:remote_product_image_folder], remote_images_dest_folder
+  end
+
+  def restart_webserver(box)
+    box.disable_safe_mode
+    puts box.execute "service httpd restart"
+    box.enable_safe_mode
+  end
+
+  def copy_code( box, release_date )
+    #tarball the code
+    cmd = "cd " + @machine[:local_checkout_directory] + "; tar czvf " + @machine[:project_name] + ".tar.gz " + "./" + release_date 
+    puts '+++ running ' + cmd
+    system(cmd)
+    #copy code
+    puts '+++ running file upload ' + File.join(@machine[:local_checkout_directory], @machine[:project_name] + '.tar.gz') + ' to ' + File.join(@machine[:remote_codebase_directory], @machine[:project_name] + ".tar.gz")
+    box.file_upload File.join(@machine[:local_checkout_directory], @machine[:project_name] + '.tar.gz'), File.join(@machine[:remote_codebase_directory], @machine[:project_name] + ".tar.gz")
+    #unzip code
+    puts "+++ running tar -xzv " + File.join(@machine[:remote_codebase_directory], @machine[:project_name] + '.tar.gz')
+    #box.run_command "tar -xzvf " + File.join(@machine[:remote_codebase_directory], @machine[:project_name] + '.tar.gz')
+    box.cd @machine[:remote_codebase_directory]
+    puts box.tar "-xzvf", File.join(@machine[:remote_codebase_directory], @machine[:project_name] + '.tar.gz')
+  end
+
+  def checkout_code(rlocation, sfolder)
+    FileUtils.mkdir( rlocation + '/' + sfolder )
+    cmd = "cd " + rlocation + ";cvs checkout -d ./" + sfolder + " " + @machine[:repository]
+    puts "+++ Running " + cmd
+    system(cmd)
+  end
+
+  def rollback
+  end
+end
+FILE
+}
+
+base = ARGV.shift
+files.each do |file, content|
+  file = File.join(base, file)
+  if File.exists?(file)
+    warn "[skip] '#{file}' already exists"
+  elsif File.exists?(file.downcase)
+    warn "[skip] '#{file.downcase}' exists, which could conflict with `#{file}'"
+  else
+    unless File.exists?(File.dirname(file))
+      puts "[add] making directory '#{File.dirname(file)}'"
+      FileUtils.mkdir(File.dirname(file))
+    end
+    puts "[add] writing '#{file}'"
+    File.open(file, "w") { |f| f.write(content) }
+  end
+end
+
+puts "[done] gunified!"
+

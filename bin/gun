@@ -1,0 +1,97 @@
+#!/usr/bin/env ruby
+
+require 'trollop'
+require 'fileutils'
+
+
+## Here's a program called "gun". We want this behavior:
+##
+##   gun staging deploy => deploys code to staging
+##   gun production deploy  => deploys to production
+##
+## 
+##
+## There are some global options, which appear to the left of the subcommand.
+## There are some subcommand options, which appear to the right.
+##
+## Subcommand options can be specific to the subcommand. 'staging' might take
+## different options from 'production'.
+##
+## We do this by calling Trollop twice; one for the global options and once for
+## the subcommand options. We need to tell Trollop what the subcommands are, so
+## that it stops processing the global options when it encounters one of them.
+
+SUB_COMMANDS = %w(staging production)
+global_opts = Trollop::options do
+  banner "gun - simple trigger happy deployment"
+  #opt :dry_run, "Don't actually do anything", :short => "-n"
+  opt :staging, "Run a command on staging", :short => "-s"
+  opt :production, "Run a command on production", :short => "-p"
+  stop_on SUB_COMMANDS
+end
+
+##These are the default settings
+machine = {
+  :location => 'nolocationselected',
+  :ssh_port => '22',
+  :ssh_user => 'root'
+  }
+
+require File.join(Dir.pwd, 'lib/gun_trigger' )
+
+cmd = ARGV.shift # get the command
+sub_cmd = ARGV.shift # get the subcommand
+cmd_opts = case cmd
+  when "staging" # parse delete options
+    Trollop::options do
+      opt :uname, "Check Kernel Version on staging server"
+      opt :deploy, "Deploy to staging server"
+    end
+    machine.merge!(GunTrigger::STAGING)
+  when "production" # parse delete options
+    Trollop::options do
+      opt :deploy, "Deploy to production server"
+    end
+    machine.merge!(GunTrigger::PRODUCTION)
+  else
+    usage =<<EOS
+Usage:
+       gun [environment] [action]
+where [environment] is:
+	staging
+ 	production	
+EOS
+    puts usage
+    Trollop::die "Unknown environment"
+    #Error unknown command"
+    #Trollop::options do
+    #  opt :deploy, "Deploy to production server"
+    #end
+  end
+
+gt = GunTrigger.new(machine)
+
+sub_cmd_opts = case sub_cmd
+  when "uname"
+    puts 'Calling uname for ' + cmd
+    gt.uname
+  when "deploy"
+    puts 'Doing deployment for ' + cmd
+    gt.deploy
+  else
+    usage = ''
+    usage =<<EOS
+Usage:
+       gun #{cmd} [action]
+where [action] is:
+	deploy
+	uname
+EOS
+    puts usage
+  end
+
+#puts "Global options: #{global_opts.inspect}"
+#puts "Subcommand: #{cmd.inspect}"
+#puts "Subcommand options: #{cmd_opts.inspect}"
+#puts "Remaining arguments: #{ARGV.inspect}"
+
