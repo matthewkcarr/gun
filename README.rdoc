@@ -20,6 +20,13 @@ You need to modify this file's ssh user name, and ssh key if needed for your env
 
 You should see if everything is connecting alright. - e.g. for uname you should see the linux kernel version on the machine you are trying to connect to.
 
-== Next explore 
-Change the lib/gun_triggers script to see how to change the machinery
-More readme to come about modifying the file to fit your need, and more auto-machinery to be added for git.
+== Next set up the deploy action
+Change the lib/gun_triggers script to see how to change the machinery for your deploy.
+But basically you run:
+  
+  gun staging deploy
+
+When you run this it will checkout the code locally, (which you can change easily in lib/gun_triggers), then it will transfer the code, unzip, and then set a soft link for your current to set to the newly checked out code, then it will restart apache, or nginx or what have you. Of course you can change how this works by editing lib/gun_triggers.rb
+
+== More
+Better readme to come about modifying the file to fit your need, and more auto-machinery to be added for git repos and checking out from your nonlocal machine so a transfer isn't needed.
