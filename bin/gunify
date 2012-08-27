@@ -105,7 +105,7 @@ class GunTrigger
 
   def run_bundler(box, release_date)
     box.disable_safe_mode
-    cmd = "cd " + File.join(@machine[:remote_codebase_directory], release_date) + "; " + 'bundle install'
+    cmd = "cd " + File.join(@machine[:remote_codebase_directory], release_date) + "; " + 'bundle install --deployment'
     puts "+++ Running " + cmd
     puts box.execute cmd
     box.enable_safe_mode
